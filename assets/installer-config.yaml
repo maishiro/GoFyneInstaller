@@ -1,0 +1,33 @@
+metadata:
+  name: "Sample Application"
+  version: "1.0.0"
+  description: "This is a sample application for testing the installer wizard."
+  publisher: "My Company"
+
+files:
+  - source: "app.exe"
+    target: "app.exe"
+    type: "executable"
+  - source: "config.ini"
+    target: "config.ini"
+    type: "config"
+  - source: "readme.txt"
+    target: "readme.txt"
+    type: "documentation"
+
+install:
+  commands:
+    - type: "run_command"
+      params:
+        command: "C:\\Windows\\System32\\cmd.exe"
+        args: ["/c", "echo Installation script executed"]
+
+uninstall:
+  commands:
+    - type: "delete_folder"
+      params:
+        path: "{INSTALL_DIR}"
+    - type: "run_command"
+      params:
+        command: "C:\\Windows\\System32\\cmd.exe"
+        args: ["/c", "echo Uninstallation script executed"]
