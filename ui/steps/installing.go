@@ -12,6 +12,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -23,10 +24,19 @@ type InstallingStep struct {
 	progressBar *widget.ProgressBar
 	statusLabel *widget.Label
 	logText     *widget.RichText
-	engine      *installer.Engine
-	ctx         context.Context
-	cancel      context.CancelFunc
-	onComplete  func() // インストール完了時のコールバック
+
+	// Bindings for thread-safe UI updates
+	progressBinding   binding.Float
+	statusBinding     binding.String
+	logBinding        binding.String
+	completionBinding binding.Bool
+
+	fullLog string // キャッシュされたログ全文
+
+	engine     *installer.Engine
+	ctx        context.Context
+	cancel     context.CancelFunc
+	onComplete func() // インストール完了時のコールバック
 }
 
 // NewInstallingStep は新しいインストール中ステップを作成
@@ -34,11 +44,15 @@ func NewInstallingStep(config *script.InstallConfig, assets embed.FS, installDir
 	ctx, cancel := context.WithCancel(context.Background())
 
 	step := &InstallingStep{
-		config:     config,
-		assets:     assets,
-		installDir: installDir,
-		ctx:        ctx,
-		cancel:     cancel,
+		config:            config,
+		assets:            assets,
+		installDir:        installDir,
+		ctx:               ctx,
+		cancel:            cancel,
+		progressBinding:   binding.NewFloat(),
+		statusBinding:     binding.NewString(),
+		logBinding:        binding.NewString(),
+		completionBinding: binding.NewBool(),
 	}
 
 	return step
@@ -57,15 +71,32 @@ func (s *InstallingStep) GetTitle() string {
 // GetContent はコンテンツウィジェットを返す
 func (s *InstallingStep) GetContent() fyne.CanvasObject {
 	// プログレスバー
-	s.progressBar = widget.NewProgressBar()
+	s.progressBar = widget.NewProgressBarWithData(s.progressBinding)
 	s.progressBar.Min = 0
 	s.progressBar.Max = 100
 
 	// ステータスラベル
-	s.statusLabel = widget.NewLabel("Preparing installation...")
+	s.statusLabel = widget.NewLabelWithData(s.statusBinding)
+	s.statusBinding.Set("Preparing installation...")
 
 	// ログテキスト
-	s.logText = widget.NewRichTextFromMarkdown("Initializing...\n")
+	s.logText = widget.NewRichText()
+	s.fullLog = "Initializing...\n"
+	s.logBinding.Set(s.fullLog)
+
+	// ログ更新用のリスナー（メインスレッドで実行されることが保証されている）
+	s.logBinding.AddListener(binding.NewDataListener(func() {
+		val, _ := s.logBinding.Get()
+		s.logText.ParseMarkdown(val)
+		s.logText.Refresh()
+	}))
+
+	// 完了通知用のリスナー（メインスレッドで実行されることが保証されている）
+	s.completionBinding.AddListener(binding.NewDataListener(func() {
+		if done, _ := s.completionBinding.Get(); done && s.onComplete != nil {
+			s.onComplete()
+		}
+	}))
 
 	// スクロール可能なログコンテナ
 	logScroll := container.NewScroll(s.logText)
@@ -94,6 +125,7 @@ func (s *InstallingStep) executeInstallation() {
 	}()
 
 	// インストールエンジン作成
+	log.Printf("Initializing installer engine with target directory: %s", s.installDir)
 	s.engine = installer.NewEngine(s.config, s.assets, s.installDir)
 
 	// 進捗チャネルの用意
@@ -102,6 +134,7 @@ func (s *InstallingStep) executeInstallation() {
 	// インストール実行エラーをキャッチするためのチャネル
 	errChan := make(chan error, 1)
 
+	log.Print("Starting installation process in a new goroutine.")
 	// インストール実行（別のゴルーチンで実行）
 	go func() {
 		if err := s.engine.Execute(s.ctx, progressChan); err != nil {
@@ -116,23 +149,25 @@ func (s *InstallingStep) executeInstallation() {
 		select {
 		case <-s.ctx.Done():
 			s.appendLog("Installation cancelled.")
+			log.Print("Installation process cancelled.")
 			return
 
 		case update := <-progressChan:
-			s.progressBar.SetValue(float64(update.Percentage))
-			s.statusLabel.SetText(update.Message)
+			s.progressBinding.Set(float64(update.Percentage))
+			log.Printf("Progress Update: %s (%d%%)", update.Message, update.Percentage) // Log progress to file
+			s.statusBinding.Set(update.Message)
 			s.appendLog(update.Message)
 
 		case err := <-errChan:
 			if err != nil {
 				s.appendLog(fmt.Sprintf("Installation failed: %v", err))
 			} else {
+				log.Print("Installation process completed successfully.")
 				s.appendLog("Installation completed successfully!")
 
 				// インストール完了時にコールバックを実行（自動遷移）
-				if s.onComplete != nil {
-					s.onComplete()
-				}
+				// 完了フラグを立てることで、メインスレッドのリスナーが onComplete を呼び出します
+				s.completionBinding.Set(true)
 			}
 			return
 		}
@@ -154,22 +189,21 @@ func (s *InstallingStep) appendLog(message string) {
 		}
 	}()
 
-	// ログテキストを安全に更新
-	current := s.logText.String()
-	safeLogs := current + strings.TrimSpace(message) + "\n"
+	// ファイルログにも出力
+	log.Print(message)
+
+	// ログを蓄積（RichText.String() は存在しないため変数で保持）
+	s.fullLog += strings.TrimSpace(message) + "\n"
 
 	// ログ行数を制限（メモリ使用量を抑える）
-	lines := strings.Split(safeLogs, "\n")
+	lines := strings.Split(s.fullLog, "\n")
 	if len(lines) > 1000 {
 		lines = lines[len(lines)-1000:]
-		safeLogs = strings.Join(lines, "\n")
+		s.fullLog = strings.Join(lines, "\n")
 	}
 
-	// テキスト更新とリフレッシュを同時に行う
-	s.logText.ParseMarkdown(safeLogs)
-
-	// ウィジェットをリフレッシュしてUI を再描画
-	s.logText.Refresh()
+	// Binding を更新（これによりリスナーがメインスレッドで起動する）
+	s.logBinding.Set(s.fullLog)
 }
 
 // Validate はバリデーション処理を実行
