@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"GoFyneInstaller/admin"
+	"GoFyneInstaller/logger"
 	"GoFyneInstaller/script"
 	"GoFyneInstaller/ui"
 
@@ -60,6 +61,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+
+	// ログの初期化（アプリケーション名を使用）
+	if err := logger.InitLogger(config.Metadata.Name); err != nil {
+		log.Printf("Warning: Could not initialize log file: %v", err)
+	}
+	defer logger.Close()
 
 	// ウィザード実行
 	if *uninstallFlag {

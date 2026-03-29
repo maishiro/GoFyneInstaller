@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,24 +95,24 @@ func (e *CommandExecutor) executeDeleteFolder(ctx context.Context, params map[st
 	// パスをトリム（余分な空白を削除）
 	path = strings.TrimSpace(path)
 
-	fmt.Printf("Attempting to delete folder: %s\n", path)
+	log.Printf("Attempting to delete folder: %s", path)
 
 	// パスが存在しないかチェック
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		// フォルダが既に存在しない場合は成功扱い
-		fmt.Printf("Path does not exist: %s\n", path)
+		log.Printf("Path does not exist: %s", path)
 		return nil
 	}
 
 	// まず Go の os.RemoveAll で試行
 	if err := os.RemoveAll(path); err == nil {
 		// 成功
-		fmt.Printf("Successfully deleted: %s\n", path)
+		log.Printf("Successfully deleted: %s", path)
 		return nil
 	}
 
 	// Go での削除失敗した場合は PowerShell で強制削除を試みる
-	fmt.Printf("Go deletion failed, trying PowerShell deletion: %s\n", path)
+	log.Printf("Go deletion failed, trying PowerShell deletion: %s", path)
 
 	// PowerShell スクリプト用にパスをエスケープ
 	escapedPath := strings.ReplaceAll(path, "'", "''")
@@ -144,19 +145,19 @@ if (Test-Path $path) {
 	if err := cmd.Run(); err != nil {
 		// PowerShell での削除も失敗した場合は警告として出力するが、エラーにしない
 		// （ファイルがロック中などの理由で失敗することがあるため）
-		fmt.Printf("Warning: Failed to delete folder %s\n", path)
-		fmt.Printf("  Error: %v\n", err)
+		log.Printf("Warning: Failed to delete folder %s", path)
+		log.Printf("  Error: %v", err)
 		if stdout.Len() > 0 {
-			fmt.Printf("  Stdout: %s\n", stdout.String())
+			log.Printf("  Stdout: %s", stdout.String())
 		}
 		if stderr.Len() > 0 {
-			fmt.Printf("  Stderr: %s\n", stderr.String())
+			log.Printf("  Stderr: %s", stderr.String())
 		}
 		return nil
 	}
 
 	if stdout.Len() > 0 {
-		fmt.Printf("PowerShell output: %s\n", stdout.String())
+		log.Printf("PowerShell output: %s", stdout.String())
 	}
 
 	return nil
