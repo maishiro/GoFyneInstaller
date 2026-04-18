@@ -2,7 +2,6 @@ package installer
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"io/fs"
 	"os"
@@ -21,12 +20,12 @@ type ProgressUpdate struct {
 // Engine はインストール処理を実行
 type Engine struct {
 	config     *script.InstallConfig
-	assets     embed.FS
+	assets     fs.FS
 	installDir string
 }
 
 // NewEngine は新しいインストールエンジンを作成
-func NewEngine(config *script.InstallConfig, assets embed.FS, installDir string) *Engine {
+func NewEngine(config *script.InstallConfig, assets fs.FS, installDir string) *Engine {
 	return &Engine{
 		config:     config,
 		assets:     assets,
@@ -75,52 +74,34 @@ func (e *Engine) Execute(ctx context.Context, progressChan chan<- ProgressUpdate
 
 // copyFiles はembedファイルをinstallDirにコピー
 func (e *Engine) copyFiles(ctx context.Context, progressChan chan<- ProgressUpdate) error {
-	filesWalked := 0
-	fileCopied := 0
-
-	// ファイル数をカウント
-	err := fs.WalkDir(e.assets, "assets", func(path string, d fs.DirEntry, err error) error {
-		if !d.IsDir() {
-			filesWalked++
-		}
+	// installer-config.yaml の files セクションに基づいてコピー
+	if len(e.config.Files) == 0 {
+		progressChan <- ProgressUpdate{Percentage: 50, Message: "No files to copy"}
 		return nil
-	})
-	if err != nil {
-		return err
 	}
 
-	// ファイルコピー
-	err = fs.WalkDir(e.assets, "assets", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	filesToCopy := len(e.config.Files)
+	filesCopied := 0
 
-		if d.IsDir() {
-			return nil
-		}
-
+	for _, fileSpec := range e.config.Files {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		// ファイルを読み込み
-		data, err := fs.ReadFile(e.assets, path)
+		// ファイルを読み込み（source パスで検索）
+		data, err := fs.ReadFile(e.assets, fileSpec.Source)
 		if err != nil {
-			return err
+			// assets/ プリフィックスでも試す（デバッグビルドの場合）
+			data, err = fs.ReadFile(e.assets, filepath.Join("assets", fileSpec.Source))
+			if err != nil {
+				return fmt.Errorf("failed to read file %s: %w", fileSpec.Source, err)
+			}
 		}
 
-		// install先を決定（assetプレフィックスを除外）
-		// path は "assets/filename" の形式
-		var relPath string
-		if len(path) > 7 {
-			relPath = path[7:] // "assets/" を除外
-		} else {
-			relPath = path
-		}
-
-		targetPath := filepath.Join(e.installDir, relPath)
+		// install先パスを決定
+		targetPath := filepath.Join(e.installDir, fileSpec.Target)
 
 		// ディレクトリ作成
 		targetDir := filepath.Dir(targetPath)
@@ -133,17 +114,15 @@ func (e *Engine) copyFiles(ctx context.Context, progressChan chan<- ProgressUpda
 			return fmt.Errorf("failed to write file %s: %w", targetPath, err)
 		}
 
-		fileCopied++
-		progress := 10 + int((float64(fileCopied)/float64(filesWalked))*40)
+		filesCopied++
+		progress := 10 + int((float64(filesCopied)/float64(filesToCopy))*40)
 		progressChan <- ProgressUpdate{
 			Percentage: progress,
-			Message:    fmt.Sprintf("Copied %d/%d files...", fileCopied, filesWalked),
+			Message:    fmt.Sprintf("Copied %s (%d/%d)...", fileSpec.Target, filesCopied, filesToCopy),
 		}
+	}
 
-		return nil
-	})
-
-	return err
+	return nil
 }
 
 // executeCommands はコマンドを実行

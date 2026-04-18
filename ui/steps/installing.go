@@ -2,8 +2,8 @@ package steps
 
 import (
 	"context"
-	"embed"
 	"fmt"
+	"io/fs"
 	"log"
 	"strings"
 
@@ -19,7 +19,7 @@ import (
 // InstallingStep はインストール進捗ステップを表す
 type InstallingStep struct {
 	config      *script.InstallConfig
-	assets      embed.FS
+	assets      fs.FS
 	installDir  string
 	progressBar *widget.ProgressBar
 	statusLabel *widget.Label
@@ -40,7 +40,7 @@ type InstallingStep struct {
 }
 
 // NewInstallingStep は新しいインストール中ステップを作成
-func NewInstallingStep(config *script.InstallConfig, assets embed.FS, installDir string) *InstallingStep {
+func NewInstallingStep(config *script.InstallConfig, assets fs.FS, installDir string) *InstallingStep {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	step := &InstallingStep{
@@ -124,9 +124,35 @@ func (s *InstallingStep) executeInstallation() {
 		}
 	}()
 
+	// zip ファイルの抽出処理
+	s.appendLog("Checking for compressed assets...")
+	var assetsToUse fs.FS = s.assets
+	var zipLoader *script.ZipLoader
+
+	// installers.zip の存在確認と抽出
+	if _, err := fs.ReadFile(s.assets, "installers.zip"); err == nil {
+		s.appendLog("Found compressed assets, extracting...")
+		// zip が存在する場合は抽出
+		loader, err := script.LoadZipFromFS(s.assets, "installers.zip", s.appendLog)
+		if err != nil {
+			s.appendLog(fmt.Sprintf("Warning: Failed to extract zip: %v, using original assets", err))
+		} else {
+			zipLoader = loader
+			assetsToUse = loader.GetFS()
+			defer func() {
+				if zipLoader != nil {
+					if err := zipLoader.CleanupTemp(); err != nil {
+						log.Printf("Failed to cleanup temp: %v", err)
+					}
+				}
+			}()
+			s.appendLog("Assets extracted successfully")
+		}
+	}
+
 	// インストールエンジン作成
 	log.Printf("Initializing installer engine with target directory: %s", s.installDir)
-	s.engine = installer.NewEngine(s.config, s.assets, s.installDir)
+	s.engine = installer.NewEngine(s.config, assetsToUse, s.installDir)
 
 	// 進捗チャネルの用意
 	progressChan := make(chan installer.ProgressUpdate, 10)

@@ -2,8 +2,8 @@ package uninstaller
 
 import (
 	"context"
-	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 
@@ -20,11 +20,11 @@ type ProgressUpdate struct {
 // Engine はアンインストール処理を実行
 type Engine struct {
 	config *script.InstallConfig
-	assets embed.FS
+	assets fs.FS
 }
 
 // NewEngine は新しいアンインストールエンジンを作成
-func NewEngine(config *script.InstallConfig, assets embed.FS) *Engine {
+func NewEngine(config *script.InstallConfig, assets fs.FS) *Engine {
 	return &Engine{
 		config: config,
 		assets: assets,

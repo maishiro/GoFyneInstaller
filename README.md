@@ -6,6 +6,7 @@
 
 - [概要](#概要)
 - [機能](#機能)
+- [ビルド方法](#ビルド方法)
 - [インストール](#インストール)
 - [インストーラ作成手順](#インストーラ作成手順)
 - [YAML設定ファイル仕様](#yaml設定ファイル仕様)
@@ -125,6 +126,36 @@ Go言語で作成されたプログラムは実行にランタイムが不要な
 
 ---
 
+## ビルド方法
+
+### 本番ビルド（デフォルト）
+
+アセットを zip 圧縮して exe に埋め込みます。配布用に最適化されています。
+
+```powershell
+.\build.ps1
+# または
+build.bat
+```
+
+**ビルド結果:**
+- ビルド時間: 秒単位で完了
+- exe サイズ: ～66 MB
+- アセット: zip 埋め込み（インストール時に temp に自動展開）
+- 圧縮効率: **45% 削減** ✨
+
+### 開発ビルド
+
+ローカルの `assets/` フォルダを参照します。アセット変更時の反映が高速です。
+
+```powershell
+.\build.ps1 -Debug
+# または
+build.bat debug
+```
+
+---
+
 ## インストール
 
 ### 前提条件
@@ -204,16 +235,39 @@ assets/
 
 **重要:** `installer-config.yaml` に記述した `files.[].source` は、実際のファイル名と一致する必要があります。
 
-### ステップ3️⃣: ビルド
+### ステップ3️⃣: アセット圧縮（本番ビルド前）
+
+全ての assets ファイルを zip 圧縮して、setup.exe に埋め込みます。**本番配布する場合は必須です。**
+
+```powershell
+# PowerShellで実行
+powershell -ExecutionPolicy Bypass -File script/create-assets-zip.ps1
+
+# 結果
+# プロジェクトルートに installers.zip が生成されます（45%圧縮）
+```
+
+**処理内容:**
+- `assets/` フォルダ内の全ファイル（.yaml ファイルを除く）を圧縮
+- 圧縮率：約45%削減
+- 出力先：プロジェクトルート直下の `installers.zip`
+- 次のビルドステップで、この zip ファイルが setup.exe に自動埋め込みされます
+
+### ステップ4️⃣: ビルド
 
 ```bash
-# 前提: assets/ フォルダにファイルが配置されていること
+# 本番ビルド（デフォルト）
+.\build.ps1
+# または
 build.bat
+
+# 開発ビルド（ローカル参照、高速反映）
+.\build.ps1 -Debug
 
 # ビルド完了 → setup.exe が生成される
 ```
 
-### ステップ4️⃣: テスト
+### ステップ5️⃣: テスト
 
 ```bash
 # インストーラー実行
@@ -229,7 +283,7 @@ build.bat
 setup.exe --uninstall
 ```
 
-### ステップ5️⃣: 配布
+### ステップ6️⃣: 配布
 
 `setup.exe` をユーザーに配布します。単一ファイルで全てを含んでいます。
 
@@ -404,7 +458,30 @@ uninstall:
 | Fyne | v2.7.3 | GUI フレームワーク |
 | YAML | via gopkg.in/yaml.v3 | 設定ファイル形式 |
 | Go embed | 標準 | アセット埋め込み |
-|  |  |  |
+| archive/zip | 標準 | アセット圧縮・展開 |
+
+### アーキテクチャの特徴
+
+**開発/本番分離 (Build Tags)**
+
+```
+├── assets_resources_embed.go   # 本番ビルド用 (//go:build !debug)
+│   └─ embed.FS で zip を埋め込み、インストール時に自動展開
+├── assets_resources_local.go   # 開発ビルド用 (//go:build debug)
+│   └─ os.DirFS でローカルアセットを参照、高速ビルド
+└── script/asset_provider.go    # 統一インタフェース
+    └─ 両者を互換的に扱い、既存コードへの変更を最小化
+```
+
+**zip 圧縮・展開フロー**
+
+```
+本番ビルド時:
+  assets/*.exe → (zip圧縮 45%) → installers.zip → (embed.FS) → setup.exe
+
+インストール時:
+  setup.exe → (zip読み込み) → (temp展開) → ファイルコピー
+```
 
 ---
 
@@ -426,7 +503,9 @@ uninstall:
 
 ## 参考リンク
 
+- [BUILD.md](BUILD.md) — ビルド設定の詳細ガイド
 - [Fyne Documentation](https://fyne.io/doc/)
 - [Go embed Package](https://pkg.go.dev/embed)
+- [archive/zip Package](https://pkg.go.dev/archive/zip)
 - [YAML 仕様](https://yaml.org/)
 - [Windows Service Management (sc.exe)](https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/sc-create)
