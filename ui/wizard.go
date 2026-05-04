@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"io/fs"
 
 	"GoFyneInstaller/script"
@@ -10,7 +11,9 @@ import (
 	"GoFyneInstaller/ui/uninstall"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -37,6 +40,7 @@ type Wizard struct {
 	nextBtn       *widget.Button
 	prevBtn       *widget.Button
 	cancelBtn     *widget.Button
+	finishBtn     *widget.Button // 完了画面用ボタン
 	onCloseFunc   func()
 	window        fyne.Window
 }
@@ -154,12 +158,37 @@ func (w *Wizard) createLayout() {
 		}
 	})
 
-	// ボタンバーコンテナ（下端に配置するために後で追加）
-	w.buttonBar = container.NewHBox(
+	// 完了ボタン（完了画面用）
+	w.finishBtn = widget.NewButton("Finish", func() {
+		if w.onCloseFunc != nil {
+			w.onCloseFunc()
+		}
+	})
+
+	// ボタンサイズ設定（最小幅を統一）
+	buttonMinWidth := float32(90)
+	w.prevBtn.Resize(fyne.NewSize(buttonMinWidth, w.prevBtn.MinSize().Height))
+	w.nextBtn.Resize(fyne.NewSize(buttonMinWidth, w.nextBtn.MinSize().Height))
+	w.cancelBtn.Resize(fyne.NewSize(buttonMinWidth, w.cancelBtn.MinSize().Height))
+	w.finishBtn.Resize(fyne.NewSize(buttonMinWidth, w.finishBtn.MinSize().Height))
+
+	// ボタンバー: Previous | Next | [スペース] | Cancel
+	// 区切り線を追加
+	divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
+	divider.StrokeWidth = 1
+
+	// ボタンコンテナ
+	buttonContainer := container.NewHBox(
 		w.prevBtn,
 		w.nextBtn,
-		widget.NewRichTextFromMarkdown(""),
+		layout.NewSpacer(), // 可変スペース
 		w.cancelBtn,
+	)
+
+	// パディング付きのボタンバー
+	w.buttonBar = container.NewVBox(
+		divider,
+		container.NewPadded(buttonContainer),
 	)
 
 	// コンテンツ領域（中央）
@@ -202,46 +231,100 @@ func (w *Wizard) updateStep() {
 
 // updateButtonBar はボタンバーの状態を更新
 func (w *Wizard) updateButtonBar() {
-	// インストール/アンインストール中のステップではボタンを削除
+	// インストール/アンインストール中のステップではボタンを無効にする
 	isInstallingStep := !w.isUninstall && w.currentIndex >= 3
 	isUninstallingStep := w.isUninstall && w.currentIndex >= 1
 
 	if isInstallingStep || isUninstallingStep {
-		w.prevBtn.Hide()
-		w.nextBtn.Hide()
-		w.cancelBtn.Hide()
+		w.prevBtn.Disable()
+		w.nextBtn.Disable()
+		w.cancelBtn.Disable()
 		return
 	}
 
-	// 最初のステップでは戻るボタンを非表示
-	if w.currentIndex == 0 {
-		w.prevBtn.Hide()
-	} else {
-		w.prevBtn.Show()
-	}
-
-	// 最後のステップでは次へボタンを「完了」に変更
+	// 最後のステップでは Finish ボタンをフルワイド配置
 	if w.currentIndex == len(w.steps)-1 {
-		w.nextBtn.SetText("Finish")
-		w.nextBtn.OnTapped = func() {
-			if w.onCloseFunc != nil {
-				w.onCloseFunc()
-			}
-		}
-	} else {
-		w.nextBtn.SetText("Next")
-		w.nextBtn.OnTapped = func() {
-			if err := w.steps[w.currentIndex].OnNext(); err != nil {
-				fmt.Printf("Validation error: %v\n", err)
-				return
-			}
+		// 区切り線を追加
+		divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
+		divider.StrokeWidth = 1
 
-			if w.currentIndex < len(w.steps)-1 {
-				w.currentIndex++
-				w.updateStep()
-			}
+		// Finish ボタンをフルワイドで配置（Border で全幅に広げる）
+		finishContainer := container.NewBorder(
+			nil, nil, nil, nil,
+			w.finishBtn,
+		)
+
+		// Finish ボタン用ボタンバー
+		finishButtonBar := container.NewVBox(
+			divider,
+			container.NewPadded(finishContainer),
+		)
+
+		// メインコンテナを Finish ボタン用に再構築
+		w.mainContainer = container.NewBorder(
+			nil,             // top
+			finishButtonBar, // bottom
+			nil,             // left
+			nil,             // right
+			w.contentArea,   // center
+		)
+		return
+	}
+
+	// 通常のステップ：Previous, Next, Cancel を表示
+	w.prevBtn.Show()
+	w.nextBtn.Show()
+	w.cancelBtn.Show()
+
+	// 最初のステップでは Previous を無効化
+	if w.currentIndex == 0 {
+		w.prevBtn.Disable()
+	} else {
+		w.prevBtn.Enable()
+	}
+
+	// Next と Cancel を有効化
+	w.nextBtn.Enable()
+	w.cancelBtn.Enable()
+
+	// Next ボタンのテキストと動作を設定
+	w.nextBtn.SetText("Next")
+	w.nextBtn.OnTapped = func() {
+		if err := w.steps[w.currentIndex].OnNext(); err != nil {
+			fmt.Printf("Validation error: %v\n", err)
+			return
+		}
+
+		if w.currentIndex < len(w.steps)-1 {
+			w.currentIndex++
+			w.updateStep()
 		}
 	}
+
+	// 通常のボタンバー
+	divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
+	divider.StrokeWidth = 1
+
+	buttonContainer := container.NewHBox(
+		w.prevBtn,
+		w.nextBtn,
+		layout.NewSpacer(), // 可変スペース
+		w.cancelBtn,
+	)
+
+	normalButtonBar := container.NewVBox(
+		divider,
+		container.NewPadded(buttonContainer),
+	)
+
+	// メインコンテナを通常のボタンバー用に再構築
+	w.mainContainer = container.NewBorder(
+		nil,             // top
+		normalButtonBar, // bottom
+		nil,             // left
+		nil,             // right
+		w.contentArea,   // center
+	)
 }
 
 // SetOnClose はウィザード終了時のコールバックを設定
