@@ -2,8 +2,8 @@ package uninstall
 
 import (
 	"context"
-	"embed"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -20,7 +20,7 @@ import (
 // UninstallingStep はアンインストール進捗ステップを表す
 type UninstallingStep struct {
 	config      *script.InstallConfig
-	assets      embed.FS
+	assets      fs.FS
 	progressBar *widget.ProgressBar
 	statusLabel *widget.Label
 	logText     *widget.RichText
@@ -31,7 +31,7 @@ type UninstallingStep struct {
 }
 
 // NewUninstallingStep は新しいアンインストール中ステップを作成
-func NewUninstallingStep(config *script.InstallConfig, assets embed.FS) *UninstallingStep {
+func NewUninstallingStep(config *script.InstallConfig, assets fs.FS) *UninstallingStep {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	step := &UninstallingStep{

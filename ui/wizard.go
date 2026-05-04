@@ -2,8 +2,8 @@ package ui
 
 import (
 	"context"
-	"embed"
 	"fmt"
+	"io/fs"
 
 	"GoFyneInstaller/script"
 	"GoFyneInstaller/ui/steps"
@@ -26,7 +26,7 @@ type WizardStep interface {
 // Wizard はインストールまたはアンインストールウィザードを管理
 type Wizard struct {
 	config        *script.InstallConfig
-	assets        embed.FS
+	assets        fs.FS
 	isUninstall   bool
 	steps         []WizardStep
 	currentIndex  int
@@ -42,12 +42,12 @@ type Wizard struct {
 }
 
 // NewWizard は新しいウィザードを作成
-func NewWizard(config *script.InstallConfig, assets embed.FS, isUninstall bool, window fyne.Window) *Wizard {
+func NewWizard(config *script.InstallConfig, assets fs.FS, isUninstall bool, window fyne.Window) *Wizard {
 	return NewWizardWithCallback(config, assets, isUninstall, nil, window)
 }
 
 // NewWizardWithCallback は新しいウィザードを作成（クローズコールバック付き）
-func NewWizardWithCallback(config *script.InstallConfig, assets embed.FS, isUninstall bool, onClose func(), window fyne.Window) *Wizard {
+func NewWizardWithCallback(config *script.InstallConfig, assets fs.FS, isUninstall bool, onClose func(), window fyne.Window) *Wizard {
 	w := &Wizard{
 		config:      config,
 		assets:      assets,

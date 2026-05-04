@@ -1,7 +1,6 @@
 package script
 
 import (
-	"embed"
 	"io/fs"
 
 	"gopkg.in/yaml.v3"
@@ -41,12 +40,17 @@ type Command struct {
 	Params map[string]interface{} `yaml:"params"`
 }
 
-// LoadConfigFromAssets はembedファイルから設定を読み込む
-func LoadConfigFromAssets(assets embed.FS) (*InstallConfig, error) {
-	// assets/installer-config.yaml を読み込む
-	data, err := fs.ReadFile(assets, "assets/installer-config.yaml")
+// LoadConfigFromAssets はアセットプロバイダーから設定を読み込む
+func LoadConfigFromAssets(provider AssetProvider) (*InstallConfig, error) {
+	assets := provider.GetFS()
+	// installer-config.yaml を読み込む（os.DirFS の場合は最初、embed.FS の場合は assets/ プリフィックス）
+	data, err := fs.ReadFile(assets, "installer-config.yaml")
 	if err != nil {
-		return nil, err
+		// embed.FS の場合は assets/ プリフィックスで試す
+		data, err = fs.ReadFile(assets, "assets/installer-config.yaml")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var config InstallConfig

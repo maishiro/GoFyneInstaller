@@ -3,7 +3,9 @@ package admin
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -37,13 +39,15 @@ func RelaunchAsAdmin() error {
 	// 元のコマンドラインを保持
 	args := os.Args[1:]
 
-	// ShellExecute wrapper を使用する必要があるため、shell32.ShellExecute を呼び出す
+	// ShellExecute wrapper を使用
 	shell32 := syscall.NewLazyDLL("shell32.dll")
 	shellExecute := shell32.NewProc("ShellExecuteW")
 
 	// ShellExecute(hwnd, lpVerb, lpFile, lpParameters, lpDirectory, nShowCmd)
 	exePtr, _ := syscall.UTF16PtrFromString(exe)
 	verbPtr, _ := syscall.UTF16PtrFromString("runas")
+
+	// パラメータ文字列を構築
 	paramsStr := ""
 	for i, arg := range args {
 		if i > 0 {
@@ -54,8 +58,8 @@ func RelaunchAsAdmin() error {
 	paramsPtr, _ := syscall.UTF16PtrFromString(paramsStr)
 	dirPtr, _ := syscall.UTF16PtrFromString("")
 
-	// nShowCmd = 1 (SW_SHOWNORMAL)
-	shellExecute.Call(
+	// ShellExecute 実行（SW_SHOWNORMAL = 1）
+	ret, _, _ := shellExecute.Call(
 		uintptr(0), // hwnd = NULL
 		uintptr(unsafe.Pointer(verbPtr)),
 		uintptr(unsafe.Pointer(exePtr)),
@@ -64,6 +68,24 @@ func RelaunchAsAdmin() error {
 		uintptr(1), // SW_SHOWNORMAL
 	)
 
+	// 戻り値チェック（32以上が成功）
+	if ret <= 32 {
+		errCode := int(ret)
+		errMsg := fmt.Sprintf("[Admin] ShellExecuteW failed with error code %d\n", errCode)
+		fmt.Fprint(os.Stderr, errMsg)
+
+		// ログファイルにも記録
+		tmpDir := os.TempDir()
+		logFile, _ := os.OpenFile(filepath.Join(tmpDir, "GoFyneInstaller_trace.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if logFile != nil {
+			fmt.Fprintf(logFile, "[%s] %s", time.Now().Format("15:04:05"), errMsg)
+			logFile.Close()
+		}
+
+		return fmt.Errorf("ShellExecuteW failed with error code %d", errCode)
+	}
+
+	fmt.Fprintf(os.Stderr, "[Admin] Successfully launched elevated process\n")
 	// 元のプロセスを終了
 	os.Exit(0)
 	return nil
