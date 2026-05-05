@@ -25,12 +25,6 @@ func (s *CompleteStep) GetTitle() string {
 
 // GetContent はコンテンツウィジェットを返す
 func (s *CompleteStep) GetContent() fyne.CanvasObject {
-	finishBtn := widget.NewButton("Finish", func() {
-		if s.onClose != nil {
-			s.onClose()
-		}
-	})
-
 	content := container.NewVBox(
 		widget.NewLabel("Uninstallation completed successfully!"),
 		widget.NewLabel(""),
@@ -38,7 +32,6 @@ func (s *CompleteStep) GetContent() fyne.CanvasObject {
 		widget.NewLabel(""),
 		widget.NewLabel("Click Finish to close this wizard."),
 		widget.NewLabel(""),
-		finishBtn,
 	)
 	return content
 }

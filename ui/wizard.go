@@ -3,14 +3,18 @@ package ui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"io/fs"
+	"log"
 
 	"GoFyneInstaller/script"
 	"GoFyneInstaller/ui/steps"
 	"GoFyneInstaller/ui/uninstall"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -37,6 +41,7 @@ type Wizard struct {
 	nextBtn       *widget.Button
 	prevBtn       *widget.Button
 	cancelBtn     *widget.Button
+	finishBtn     *widget.Button // 完了画面用ボタン
 	onCloseFunc   func()
 	window        fyne.Window
 }
@@ -154,12 +159,37 @@ func (w *Wizard) createLayout() {
 		}
 	})
 
-	// ボタンバーコンテナ（下端に配置するために後で追加）
-	w.buttonBar = container.NewHBox(
+	// 完了ボタン（完了画面用）
+	w.finishBtn = widget.NewButton("Finish", func() {
+		if w.onCloseFunc != nil {
+			w.onCloseFunc()
+		}
+	})
+
+	// ボタンサイズ設定（最小幅を統一）
+	buttonMinWidth := float32(90)
+	w.prevBtn.Resize(fyne.NewSize(buttonMinWidth, w.prevBtn.MinSize().Height))
+	w.nextBtn.Resize(fyne.NewSize(buttonMinWidth, w.nextBtn.MinSize().Height))
+	w.cancelBtn.Resize(fyne.NewSize(buttonMinWidth, w.cancelBtn.MinSize().Height))
+	w.finishBtn.Resize(fyne.NewSize(buttonMinWidth, w.finishBtn.MinSize().Height))
+
+	// ボタンバー: Previous | Next | [スペース] | Cancel
+	// 区切り線を追加
+	divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
+	divider.StrokeWidth = 1
+
+	// ボタンコンテナ
+	buttonContainer := container.NewHBox(
 		w.prevBtn,
 		w.nextBtn,
-		widget.NewRichTextFromMarkdown(""),
+		layout.NewSpacer(), // 可変スペース
 		w.cancelBtn,
+	)
+
+	// パディング付きのボタンバー
+	w.buttonBar = container.NewVBox(
+		divider,
+		container.NewPadded(buttonContainer),
 	)
 
 	// コンテンツ領域（中央）
@@ -202,45 +232,88 @@ func (w *Wizard) updateStep() {
 
 // updateButtonBar はボタンバーの状態を更新
 func (w *Wizard) updateButtonBar() {
-	// インストール/アンインストール中のステップではボタンを削除
+	log.Printf("Updating button bar for step index: %d, title: %s\n", w.currentIndex, w.steps[w.currentIndex].GetTitle())
+
+	// 区切り線を追加
+	divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
+	divider.StrokeWidth = 1
+
+	// 最後のステップでは Finish ボタンをフルワイド配置
+	if w.currentIndex == len(w.steps)-1 {
+		// ログ出力
+		log.Printf("Reached final step: %s\n", w.steps[w.currentIndex].GetTitle())
+
+		// Finish ボタンのサイズ制限を削除（フルワイド配置のため）
+		w.finishBtn.Resize(fyne.NewSize(0, 0))
+
+		// Finish ボタンを全幅に配置
+		// Border を使用して、ボタンをコンテナ全幅に広げる
+		finishButtonRow := container.NewBorder(
+			nil, nil, nil, nil,
+			w.finishBtn,
+		)
+
+		// buttonBar の Objects を更新（Finish ボタンを下端に配置）
+		// Padded を使わず直接配置することで、ボタンが下端全幅になる
+		w.buttonBar.Objects = []fyne.CanvasObject{
+			divider,
+			finishButtonRow,
+		}
+	}
+
+	// インストール/アンインストール中のステップではボタンを無効にする
 	isInstallingStep := !w.isUninstall && w.currentIndex >= 3
 	isUninstallingStep := w.isUninstall && w.currentIndex >= 1
 
 	if isInstallingStep || isUninstallingStep {
-		w.prevBtn.Hide()
-		w.nextBtn.Hide()
-		w.cancelBtn.Hide()
+		w.prevBtn.Disable()
+		w.nextBtn.Disable()
+		w.cancelBtn.Disable()
 		return
 	}
 
-	// 最初のステップでは戻るボタンを非表示
+	// 通常のステップ：Previous, Next, Cancel を表示
+	w.prevBtn.Show()
+	w.nextBtn.Show()
+	w.cancelBtn.Show()
+
+	// 最初のステップでは Previous を無効化
 	if w.currentIndex == 0 {
-		w.prevBtn.Hide()
+		w.prevBtn.Disable()
 	} else {
-		w.prevBtn.Show()
+		w.prevBtn.Enable()
 	}
 
-	// 最後のステップでは次へボタンを「完了」に変更
-	if w.currentIndex == len(w.steps)-1 {
-		w.nextBtn.SetText("Finish")
-		w.nextBtn.OnTapped = func() {
-			if w.onCloseFunc != nil {
-				w.onCloseFunc()
-			}
-		}
-	} else {
-		w.nextBtn.SetText("Next")
-		w.nextBtn.OnTapped = func() {
-			if err := w.steps[w.currentIndex].OnNext(); err != nil {
-				fmt.Printf("Validation error: %v\n", err)
-				return
-			}
+	// Next と Cancel を有効化
+	w.nextBtn.Enable()
+	w.cancelBtn.Enable()
 
-			if w.currentIndex < len(w.steps)-1 {
-				w.currentIndex++
-				w.updateStep()
-			}
+	// Next ボタンのテキストと動作を設定
+	w.nextBtn.SetText("Next")
+	w.nextBtn.OnTapped = func() {
+		if err := w.steps[w.currentIndex].OnNext(); err != nil {
+			fmt.Printf("Validation error: %v\n", err)
+			return
 		}
+
+		if w.currentIndex < len(w.steps)-1 {
+			w.currentIndex++
+			w.updateStep()
+		}
+	}
+
+	// 通常のボタンコンテナ
+	buttonContainer := container.NewHBox(
+		w.prevBtn,
+		w.nextBtn,
+		layout.NewSpacer(), // 可変スペース
+		w.cancelBtn,
+	)
+
+	// buttonBar の Objects を更新
+	w.buttonBar.Objects = []fyne.CanvasObject{
+		divider,
+		container.NewPadded(buttonContainer),
 	}
 }
 
