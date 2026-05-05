@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"io/fs"
+	"log"
 
 	"GoFyneInstaller/script"
 	"GoFyneInstaller/ui/steps"
@@ -231,6 +232,35 @@ func (w *Wizard) updateStep() {
 
 // updateButtonBar はボタンバーの状態を更新
 func (w *Wizard) updateButtonBar() {
+	log.Printf("Updating button bar for step index: %d, title: %s\n", w.currentIndex, w.steps[w.currentIndex].GetTitle())
+
+	// 区切り線を追加
+	divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
+	divider.StrokeWidth = 1
+
+	// 最後のステップでは Finish ボタンをフルワイド配置
+	if w.currentIndex == len(w.steps)-1 {
+		// ログ出力
+		log.Printf("Reached final step: %s\n", w.steps[w.currentIndex].GetTitle())
+
+		// Finish ボタンのサイズ制限を削除（フルワイド配置のため）
+		w.finishBtn.Resize(fyne.NewSize(0, 0))
+
+		// Finish ボタンを全幅に配置
+		// Border を使用して、ボタンをコンテナ全幅に広げる
+		finishButtonRow := container.NewBorder(
+			nil, nil, nil, nil,
+			w.finishBtn,
+		)
+
+		// buttonBar の Objects を更新（Finish ボタンを下端に配置）
+		// Padded を使わず直接配置することで、ボタンが下端全幅になる
+		w.buttonBar.Objects = []fyne.CanvasObject{
+			divider,
+			finishButtonRow,
+		}
+	}
+
 	// インストール/アンインストール中のステップではボタンを無効にする
 	isInstallingStep := !w.isUninstall && w.currentIndex >= 3
 	isUninstallingStep := w.isUninstall && w.currentIndex >= 1
@@ -239,35 +269,6 @@ func (w *Wizard) updateButtonBar() {
 		w.prevBtn.Disable()
 		w.nextBtn.Disable()
 		w.cancelBtn.Disable()
-		return
-	}
-
-	// 最後のステップでは Finish ボタンをフルワイド配置
-	if w.currentIndex == len(w.steps)-1 {
-		// 区切り線を追加
-		divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
-		divider.StrokeWidth = 1
-
-		// Finish ボタンをフルワイドで配置（Border で全幅に広げる）
-		finishContainer := container.NewBorder(
-			nil, nil, nil, nil,
-			w.finishBtn,
-		)
-
-		// Finish ボタン用ボタンバー
-		finishButtonBar := container.NewVBox(
-			divider,
-			container.NewPadded(finishContainer),
-		)
-
-		// メインコンテナを Finish ボタン用に再構築
-		w.mainContainer = container.NewBorder(
-			nil,             // top
-			finishButtonBar, // bottom
-			nil,             // left
-			nil,             // right
-			w.contentArea,   // center
-		)
 		return
 	}
 
@@ -301,10 +302,7 @@ func (w *Wizard) updateButtonBar() {
 		}
 	}
 
-	// 通常のボタンバー
-	divider := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
-	divider.StrokeWidth = 1
-
+	// 通常のボタンコンテナ
 	buttonContainer := container.NewHBox(
 		w.prevBtn,
 		w.nextBtn,
@@ -312,19 +310,11 @@ func (w *Wizard) updateButtonBar() {
 		w.cancelBtn,
 	)
 
-	normalButtonBar := container.NewVBox(
+	// buttonBar の Objects を更新
+	w.buttonBar.Objects = []fyne.CanvasObject{
 		divider,
 		container.NewPadded(buttonContainer),
-	)
-
-	// メインコンテナを通常のボタンバー用に再構築
-	w.mainContainer = container.NewBorder(
-		nil,             // top
-		normalButtonBar, // bottom
-		nil,             // left
-		nil,             // right
-		w.contentArea,   // center
-	)
+	}
 }
 
 // SetOnClose はウィザード終了時のコールバックを設定
